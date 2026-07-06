@@ -402,6 +402,37 @@ def _background_review_preflight(action: str, name: str) -> Optional[Dict[str, A
     return _background_review_write_guard(name, existing["path"], action)
 
 
+def _hermex_maintenance_preflight(
+    action: str,
+    name: str,
+    *,
+    evidence: Optional[str] = None,
+    content: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    try:
+        from agent.hermex_maintenance_policy import evaluate_skill_write
+
+        return evaluate_skill_write(
+            action=action,
+            name=name,
+            evidence=evidence,
+            content=content,
+        )
+    except Exception:
+        logger.debug("Hermex maintenance policy preflight failed", exc_info=True)
+        return None
+
+
+def _hermex_reference_validation_guard(skill_dir: Path) -> Optional[Dict[str, Any]]:
+    try:
+        from agent.hermex_maintenance_policy import validate_references_if_needed
+
+        return validate_references_if_needed(skill_dir)
+    except Exception:
+        logger.debug("Hermex reference validation failed unexpectedly", exc_info=True)
+        return None
+
+
 def _curator_consolidation_delete_guard(
     name: str, absorbed_into: Optional[str]
 ) -> Optional[Dict[str, Any]]:
@@ -815,6 +846,11 @@ def _create_skill(name: str, content: str, category: str = None) -> Dict[str, An
         shutil.rmtree(skill_dir, ignore_errors=True)
         return {"success": False, "error": scan_error}
 
+    ref_error = _hermex_reference_validation_guard(skill_dir)
+    if ref_error:
+        shutil.rmtree(skill_dir, ignore_errors=True)
+        return ref_error
+
     # Extract description from frontmatter for verbose notifications
     _desc = ""
     try:
@@ -875,6 +911,12 @@ def _edit_skill(name: str, content: str) -> Dict[str, Any]:
         if original_content is not None:
             _atomic_write_text(skill_md, original_content)
         return {"success": False, "error": scan_error}
+
+    ref_error = _hermex_reference_validation_guard(existing["path"])
+    if ref_error:
+        if original_content is not None:
+            _atomic_write_text(skill_md, original_content)
+        return ref_error
 
     # Extract description from new content for verbose notifications
     _desc = ""
@@ -995,6 +1037,11 @@ def _patch_skill(
         _atomic_write_text(target, original_content)
         return {"success": False, "error": scan_error}
 
+    ref_error = _hermex_reference_validation_guard(skill_dir)
+    if ref_error:
+        _atomic_write_text(target, original_content)
+        return ref_error
+
     result = {
         "success": True,
         "message": f"Patched {'SKILL.md' if not file_path else file_path} in skill '{name}' ({match_count} replacement{'s' if match_count > 1 else ''}).",
@@ -1007,7 +1054,11 @@ def _patch_skill(
     return result
 
 
-def _delete_skill(name: str, absorbed_into: Optional[str] = None) -> Dict[str, Any]:
+def _delete_skill(
+    name: str,
+    absorbed_into: Optional[str] = None,
+    support_files_preserved: bool = False,
+) -> Dict[str, Any]:
     """Delete a skill.
 
     ``absorbed_into`` declares intent:
@@ -1044,6 +1095,7 @@ def _delete_skill(name: str, absorbed_into: Optional[str] = None) -> Dict[str, A
         else ""
     )
     is_consolidation = bool(absorbed_target)
+    target_skill_dir: Optional[Path] = None
     if is_consolidation:
         target_name = absorbed_target
         if target_name == name:
@@ -1060,8 +1112,23 @@ def _delete_skill(name: str, absorbed_into: Optional[str] = None) -> Dict[str, A
                     f"Create or patch the umbrella skill first, then retry the delete."
                 ),
             }
+        target_skill_dir = target["path"]
 
     skill_dir = existing["path"]
+    if is_consolidation:
+        try:
+            from agent.hermex_maintenance_policy import validate_consolidation_delete
+
+            consolidation_guard = validate_consolidation_delete(
+                source_skill_dir=skill_dir,
+                target_skill_dir=target_skill_dir,
+                support_files_preserved=bool(support_files_preserved),
+            )
+            if consolidation_guard:
+                return consolidation_guard
+        except Exception:
+            logger.debug("Hermex consolidation validation failed", exc_info=True)
+
     skills_root = _containing_skills_root(skill_dir)
 
     # Defense-in-depth before the recursive delete (port of Kilo Code #11240).
@@ -1153,6 +1220,18 @@ def _write_file(name: str, file_path: str, file_content: str) -> Dict[str, Any]:
         )
         if read_guard:
             return read_guard
+    else:
+        try:
+            from agent.hermex_maintenance_policy import hermex_maintenance_enabled
+
+            if hermex_maintenance_enabled():
+                read_guard = _background_review_read_before_write_guard(
+                    name, existing["path"] / "SKILL.md", "write_file", "SKILL.md"
+                )
+                if read_guard:
+                    return read_guard
+        except Exception:
+            pass
     target.parent.mkdir(parents=True, exist_ok=True)
     # Back up for rollback
     original_content = target.read_text(encoding="utf-8") if target.exists() else None
@@ -1166,6 +1245,14 @@ def _write_file(name: str, file_path: str, file_content: str) -> Dict[str, Any]:
         else:
             target.unlink(missing_ok=True)
         return {"success": False, "error": scan_error}
+
+    ref_error = _hermex_reference_validation_guard(existing["path"])
+    if ref_error:
+        if original_content is not None:
+            _atomic_write_text(target, original_content)
+        else:
+            target.unlink(missing_ok=True)
+        return ref_error
 
     return {
         "success": True,
@@ -1214,12 +1301,19 @@ def _remove_file(name: str, file_path: str) -> Dict[str, Any]:
     if read_guard:
         return read_guard
 
+    original_bytes = target.read_bytes()
     target.unlink()
 
     # Clean up empty subdirectories
     parent = target.parent
     if parent != skill_dir and parent.exists() and not any(parent.iterdir()):
         parent.rmdir()
+
+    ref_error = _hermex_reference_validation_guard(skill_dir)
+    if ref_error:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(original_bytes)
+        return ref_error
 
     return {
         "success": True,
@@ -1295,6 +1389,8 @@ def apply_skill_pending(payload: Dict[str, Any]) -> str:
             new_string=payload.get("new_string"),
             replace_all=payload.get("replace_all", False),
             absorbed_into=payload.get("absorbed_into"),
+            evidence=payload.get("evidence"),
+            support_files_preserved=payload.get("support_files_preserved", False),
         )
     finally:
         _skill_gate_bypass.reset(token)
@@ -1311,6 +1407,8 @@ def skill_manage(
     new_string: str = None,
     replace_all: bool = False,
     absorbed_into: str = None,
+    evidence: str = None,
+    support_files_preserved: bool = False,
 ) -> str:
     """
     Manage user-created skills. Dispatches to the appropriate action handler.
@@ -1320,6 +1418,14 @@ def skill_manage(
     preflight = _background_review_preflight(action, name)
     if preflight is not None:
         return json.dumps(preflight, ensure_ascii=False)
+    hermex_preflight = _hermex_maintenance_preflight(
+        action,
+        name,
+        evidence=evidence,
+        content=content,
+    )
+    if hermex_preflight is not None:
+        return json.dumps(hermex_preflight, ensure_ascii=False)
 
     # Approval gate: when on, stages the write for review (skills are too large
     # to review inline, so they always stage regardless of origin); when off
@@ -1330,6 +1436,7 @@ def skill_manage(
         file_path=file_path, file_content=file_content,
         old_string=old_string, new_string=new_string,
         replace_all=replace_all, absorbed_into=absorbed_into,
+        evidence=evidence, support_files_preserved=support_files_preserved,
     )
     if gate_result is not None:
         return gate_result
@@ -1352,7 +1459,11 @@ def skill_manage(
         result = _patch_skill(name, old_string, new_string, file_path, replace_all)
 
     elif action == "delete":
-        result = _delete_skill(name, absorbed_into=absorbed_into)
+        result = _delete_skill(
+            name,
+            absorbed_into=absorbed_into,
+            support_files_preserved=bool(support_files_preserved),
+        )
 
     elif action == "write_file":
         if not file_path:
@@ -1435,7 +1546,11 @@ SKILL_MANAGE_SCHEMA = {
         "Pinned skills are protected from deletion only — skill_manage(action='delete') "
         "will refuse with a message pointing the user to `hermes curator unpin <name>`. "
         "Patches and edits go through on pinned skills so you can still improve them as "
-        "pitfalls come up; pin only guards against irrecoverable loss."
+        "pitfalls come up; pin only guards against irrecoverable loss.\n\n"
+        "When Hermex/background self-improvement mode is active, autonomous skill "
+        "writes must include concrete `evidence`; create calls must scan existing "
+        "skills first, and consolidation deletes that preserve support packages "
+        "must set `support_files_preserved=true`."
     ),
     "parameters": {
         "type": "object",
@@ -1514,6 +1629,23 @@ SKILL_MANAGE_SCHEMA = {
                     "rewriting) will have to guess at intent."
                 )
             },
+            "evidence": {
+                "type": "string",
+                "description": (
+                    "For Hermex/background self-improvement writes: concrete "
+                    "evidence, fixture/eval result, verification output, or "
+                    "observed failure that justifies this autonomous mutation."
+                )
+            },
+            "support_files_preserved": {
+                "type": "boolean",
+                "description": (
+                    "For Hermex curator consolidation deletes: true only after "
+                    "support files and concrete references from the source skill "
+                    "were preserved or re-homed and destination references were "
+                    "validated."
+                )
+            },
         },
         "required": ["action", "name"],
     },
@@ -1537,6 +1669,8 @@ registry.register(
         old_string=args.get("old_string"),
         new_string=args.get("new_string"),
         replace_all=args.get("replace_all", False),
-        absorbed_into=args.get("absorbed_into")),
+        absorbed_into=args.get("absorbed_into"),
+        evidence=args.get("evidence"),
+        support_files_preserved=args.get("support_files_preserved", False)),
     emoji="📝",
 )

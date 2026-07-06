@@ -701,6 +701,17 @@ def skills_list(category: str = None, task_id: str = None) -> str:
         JSON string with minimal skill info: name, description, category
     """
     try:
+        from agent.hermex_maintenance_policy import (
+            hermex_maintenance_enabled,
+            mark_skill_index_reviewed,
+        )
+
+        if hermex_maintenance_enabled():
+            mark_skill_index_reviewed()
+    except Exception:
+        pass
+
+    try:
         if not SKILLS_DIR.exists():
             SKILLS_DIR.mkdir(parents=True, exist_ok=True)
             return json.dumps(

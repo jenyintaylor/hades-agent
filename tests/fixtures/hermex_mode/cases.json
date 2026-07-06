@@ -1,0 +1,57 @@
+[
+  {
+    "id": "default_prompt_mode_is_off",
+    "kind": "prompt_policy",
+    "config": {"agent": {"prompt_mode": "default"}},
+    "expected_mode": "default",
+    "expected_is_hermex": false
+  },
+  {
+    "id": "codex_like_alias_enables_hermex",
+    "kind": "prompt_policy",
+    "config": {"agent": {"prompt_mode": "codex-like"}},
+    "expected_mode": "hermex",
+    "expected_is_hermex": true
+  },
+  {
+    "id": "legacy_boolean_enables_hermex",
+    "kind": "prompt_policy",
+    "config": {"agent": {"hermex_mode": true}},
+    "expected_mode": "hermex",
+    "expected_is_hermex": true
+  },
+  {
+    "id": "named_development_skill_preloads",
+    "kind": "skill_candidates",
+    "user_message": "Please use development-operating-procedure for this code change.",
+    "available_skill_names": [
+      "development-operating-procedure",
+      "kanban-task-executor"
+    ],
+    "expected_candidates": ["development-operating-procedure"]
+  },
+  {
+    "id": "named_kanban_skill_preloads",
+    "kind": "skill_candidates",
+    "user_message": "Run this through kanban-task-executor and keep the board clean.",
+    "available_skill_names": [
+      "development-operating-procedure",
+      "kanban-task-executor"
+    ],
+    "expected_candidates": ["kanban-task-executor"]
+  },
+  {
+    "id": "short_names_do_not_passively_match_substrings",
+    "kind": "skill_candidates",
+    "user_message": "Please improve the project.",
+    "available_skill_names": ["pr"],
+    "expected_candidates": []
+  },
+  {
+    "id": "explicit_dollar_skill_loads_without_index",
+    "kind": "skill_candidates",
+    "user_message": "Use $superpowers:writing-plans before editing.",
+    "available_skill_names": [],
+    "expected_candidates": ["superpowers:writing-plans"]
+  }
+]

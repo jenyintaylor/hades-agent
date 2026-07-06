@@ -1310,6 +1310,14 @@ def init_agent(
     _agent_section = _agent_cfg.get("agent", {})
     if not isinstance(_agent_section, dict):
         _agent_section = {}
+    try:
+        from agent.prompt_policy import resolve_prompt_policy
+
+        agent._prompt_policy = resolve_prompt_policy(_agent_cfg)
+        agent._prompt_mode = agent._prompt_policy.mode
+    except Exception:
+        agent._prompt_policy = None
+        agent._prompt_mode = "default"
     agent._tool_use_enforcement = _agent_section.get("tool_use_enforcement", "auto")
 
     # Intent-ack continuation config: "auto" (default — codex_responses only,

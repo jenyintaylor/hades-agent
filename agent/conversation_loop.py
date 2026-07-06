@@ -596,6 +596,22 @@ def run_conversation(
     _should_review_memory = _ctx.should_review_memory
     _plugin_user_context = _ctx.plugin_user_context
     _ext_prefetch_cache = _ctx.ext_prefetch_cache
+    _hermex_skill_context = ""
+    try:
+        from agent.prompt_policy import policy_for_agent
+
+        _policy = policy_for_agent(agent)
+        _valid_tool_names = getattr(agent, "valid_tool_names", None) or set()
+        _skill_tools_available = "skill_view" in _valid_tool_names
+        if _policy.is_hermex and _skill_tools_available:
+            from agent.hermex_skill_preflight import build_hermex_skill_preload_context
+
+            _hermex_skill_context = build_hermex_skill_preload_context(
+                original_user_message,
+                task_id=effective_task_id,
+            )
+    except Exception:
+        logger.debug("Hermex skill preflight failed", exc_info=True)
 
     # Main conversation loop counters (pure locals consumed by the loop below).
     api_call_count = 0
@@ -796,6 +812,8 @@ def run_conversation(
                         _injections.append(_fenced)
                 if _plugin_user_context:
                     _injections.append(_plugin_user_context)
+                if _hermex_skill_context:
+                    _injections.append(_hermex_skill_context)
                 if _injections:
                     _base = api_msg.get("content", "")
                     if isinstance(_base, str):

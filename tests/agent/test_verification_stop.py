@@ -39,6 +39,8 @@ def clear_verify_env(monkeypatch):
         "HERMES_PLATFORM",
         "HERMES_SESSION_PLATFORM",
         "HERMES_SESSION_SOURCE",
+        "HERMES_PROMPT_MODE",
+        "HERMES_HERMEX_MODE",
     ):
         monkeypatch.delenv(var, raising=False)
     return monkeypatch
@@ -92,6 +94,20 @@ def test_verify_on_stop_auto_off_on_gateway_messaging_platform(clear_verify_env)
     # With explicit "auto", a real Telegram turn resolves OFF.
     clear_verify_env.setenv("HERMES_SESSION_PLATFORM", "telegram")
     assert verify_on_stop_enabled({"agent": {"verify_on_stop": "auto"}}) is False
+
+
+def test_hermex_mode_forces_verify_on_stop_on_gateway_messaging(clear_verify_env):
+    clear_verify_env.setenv("HERMES_SESSION_PLATFORM", "telegram")
+    assert verify_on_stop_enabled(
+        {"agent": {"prompt_mode": "hermex", "verify_on_stop": "auto"}}
+    ) is True
+
+
+def test_hermex_mode_respects_explicit_verify_on_stop_false(clear_verify_env):
+    clear_verify_env.setenv("HERMES_SESSION_PLATFORM", "telegram")
+    assert verify_on_stop_enabled(
+        {"agent": {"prompt_mode": "hermex", "verify_on_stop": False}}
+    ) is False
 
 
 @pytest.mark.parametrize(

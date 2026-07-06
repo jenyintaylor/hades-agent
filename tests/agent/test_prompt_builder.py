@@ -18,6 +18,7 @@ from agent.prompt_builder import (
     build_skills_system_prompt,
     build_nous_subscription_prompt,
     build_context_files_prompt,
+    build_hermex_context_files_prompt,
     CONTEXT_FILE_MAX_CHARS,
     _dynamic_context_file_max_chars,
     _get_context_file_max_chars,
@@ -891,6 +892,48 @@ class TestBuildContextFilesPrompt:
         assert "ESLint" in result
 
 
+class TestBuildHermexContextFilesPrompt:
+    def test_layers_project_docs_from_git_root_to_cwd(self, tmp_path):
+        repo = tmp_path / "repo"
+        service = repo / "services"
+        api = service / "api"
+        api.mkdir(parents=True)
+        (repo / ".git").mkdir()
+        (repo / "AGENTS.md").write_text("Root instructions.")
+        (service / "AGENTS.md").write_text("Service instructions.")
+        (api / "AGENTS.override.md").write_text("API override instructions.")
+
+        result = build_hermex_context_files_prompt(cwd=str(api), skip_soul=True)
+
+        assert "Hermex Layered Project Context" in result
+        root_idx = result.index("Root instructions.")
+        service_idx = result.index("Service instructions.")
+        api_idx = result.index("API override instructions.")
+        assert root_idx < service_idx < api_idx
+        assert result.count("<INSTRUCTIONS>") == 3
+
+    def test_one_highest_priority_file_per_directory(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        (tmp_path / ".hermes.md").write_text("Hermes wins.")
+        (tmp_path / "AGENTS.md").write_text("Agents lose.")
+
+        result = build_hermex_context_files_prompt(cwd=str(tmp_path), skip_soul=True)
+
+        assert "Hermes wins" in result
+        assert "Agents lose" not in result
+
+    def test_includes_cursor_rules_when_no_higher_priority_file(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        rules = tmp_path / ".cursor" / "rules"
+        rules.mkdir(parents=True)
+        (rules / "style.mdc").write_text("Use strict TypeScript.")
+
+        result = build_hermex_context_files_prompt(cwd=str(tmp_path), skip_soul=True)
+
+        assert "Use strict TypeScript" in result
+        assert ".cursor/rules/style.mdc" in result
+
+
 # =========================================================================
 # .hermes.md helper functions
 # =========================================================================
@@ -1644,5 +1687,3 @@ class TestParallelToolCallGuidance:
 # =========================================================================
 # Budget warning history stripping
 # =========================================================================
-
-

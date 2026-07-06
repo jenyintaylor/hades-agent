@@ -43,6 +43,7 @@ from agent.prompt_builder import (
     TOOL_USE_ENFORCEMENT_MODELS,
     drain_truncation_warnings,
 )
+from agent.prompt_policy import HERMEX_EXECUTION_GUIDANCE, policy_for_agent
 from agent.runtime_cwd import resolve_context_cwd
 
 
@@ -132,6 +133,7 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # patch ``run_agent.get_toolset_for_tool`` and similar helpers, so
     # we resolve through ``_ra()`` to honor those patches.
     _r = _ra()
+    _prompt_policy = policy_for_agent(agent)
 
     # Resolve the model's context window once so context-file caps can scale
     # to it (dynamic cap — see prompt_builder._dynamic_context_file_max_chars).
@@ -256,6 +258,9 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
             # existing tools, replies with plans instead of executing).
             if "gpt" in _model_lower or "codex" in _model_lower or "grok" in _model_lower:
                 stable_parts.append(OPENAI_MODEL_EXECUTION_GUIDANCE)
+
+    if _prompt_policy.is_hermex:
+        stable_parts.append(HERMEX_EXECUTION_GUIDANCE)
 
     has_skills_tools = any(name in agent.valid_tool_names for name in ['skills_list', 'skill_view', 'skill_manage'])
     if has_skills_tools:
@@ -414,9 +419,15 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         # CLI), None lets build_context_files_prompt fall back to the launch
         # dir — the user's real cwd there, but the install dir for the gateway
         # daemon, which is why the gateway sets TERMINAL_CWD.
-        context_files_prompt = _r.build_context_files_prompt(
-            cwd=resolve_context_cwd(), skip_soul=_soul_loaded,
-            context_length=_ctx_len)
+        context_cwd = resolve_context_cwd()
+        if _prompt_policy.is_hermex and hasattr(_r, "build_hermex_context_files_prompt"):
+            context_files_prompt = _r.build_hermex_context_files_prompt(
+                cwd=context_cwd, skip_soul=_soul_loaded,
+                context_length=_ctx_len)
+        else:
+            context_files_prompt = _r.build_context_files_prompt(
+                cwd=context_cwd, skip_soul=_soul_loaded,
+                context_length=_ctx_len)
         if context_files_prompt:
             context_parts.append(context_files_prompt)
 

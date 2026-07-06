@@ -164,8 +164,22 @@ def verify_on_stop_enabled(config: dict[str, Any] | None = None) -> bool:
             return True
         if token in {"0", "false", "no", "off"}:
             return False
+        try:
+            from agent.prompt_policy import hermex_enabled
+
+            if hermex_enabled(config):
+                return True
+        except Exception:
+            pass
         if token == "auto":
             return not _session_is_messaging_surface()
+    try:
+        from agent.prompt_policy import hermex_enabled
+
+        if hermex_enabled(config):
+            return True
+    except Exception:
+        pass
     # Missing or unrecognized value -> surface-aware "auto" default.
     return not _session_is_messaging_surface()
 

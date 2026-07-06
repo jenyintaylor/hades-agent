@@ -1921,6 +1921,137 @@ def _load_cursorrules(cwd_path: Path, context_length: Optional[int] = None) -> s
     )
 
 
+_HERMEX_CONTEXT_CANDIDATES = (
+    ".hermes.md",
+    "HERMES.md",
+    "AGENTS.override.md",
+    "AGENTS.md",
+    "agents.md",
+    "CLAUDE.md",
+    "claude.md",
+    ".cursorrules",
+)
+
+
+def _dirs_from_root_to_cwd(cwd_path: Path) -> list[Path]:
+    """Return directories from git root (when present) down to cwd."""
+    root = _find_git_root(cwd_path) or cwd_path
+    try:
+        rel = cwd_path.relative_to(root)
+    except ValueError:
+        return [cwd_path]
+    dirs = [root]
+    current = root
+    for part in rel.parts:
+        current = current / part
+        dirs.append(current)
+    return dirs
+
+
+def _read_hermex_context_file(
+    candidate: Path,
+    *,
+    cwd_path: Path,
+    context_length: Optional[int],
+) -> str:
+    try:
+        content = candidate.read_text(encoding="utf-8").strip()
+    except Exception as e:
+        logger.debug("Could not read %s: %s", candidate, e)
+        return ""
+    if not content:
+        return ""
+    if candidate.name in {".hermes.md", "HERMES.md"}:
+        content = _strip_yaml_frontmatter(content)
+    rel = str(candidate)
+    try:
+        rel = str(candidate.relative_to(cwd_path))
+    except ValueError:
+        try:
+            rel = str(candidate.relative_to(_find_git_root(cwd_path) or cwd_path))
+        except ValueError:
+            rel = str(candidate)
+    content = _scan_context_content(content, rel)
+    result = f"## {rel}\n\n<INSTRUCTIONS>\n{content}\n</INSTRUCTIONS>"
+    return _truncate_content(
+        result,
+        rel,
+        context_length=context_length,
+        read_path=str(candidate),
+    )
+
+
+def _load_hermex_context_for_dir(
+    directory: Path,
+    *,
+    cwd_path: Path,
+    context_length: Optional[int],
+) -> str:
+    """Load the highest-priority instruction file for one directory."""
+    for name in _HERMEX_CONTEXT_CANDIDATES:
+        candidate = directory / name
+        try:
+            if candidate.is_file():
+                return _read_hermex_context_file(
+                    candidate, cwd_path=cwd_path, context_length=context_length
+                )
+        except OSError:
+            continue
+
+    cursor_rules_dir = directory / ".cursor" / "rules"
+    try:
+        mdc_files = sorted(cursor_rules_dir.glob("*.mdc")) if cursor_rules_dir.is_dir() else []
+    except OSError:
+        mdc_files = []
+    sections = [
+        _read_hermex_context_file(
+            path, cwd_path=cwd_path, context_length=context_length
+        )
+        for path in mdc_files
+    ]
+    return "\n\n".join(section for section in sections if section)
+
+
+def build_hermex_context_files_prompt(
+    cwd: Optional[str] = None,
+    skip_soul: bool = False,
+    context_length: Optional[int] = None,
+) -> str:
+    """Load Codex-like layered project instructions for hermex mode.
+
+    Unlike the legacy context loader, this scans from the git root to the
+    active cwd and includes one highest-priority instruction file per
+    directory. Broader instructions appear first; closer instructions appear
+    later and can specialize them. SOUL.md remains independent.
+    """
+    if cwd is None:
+        cwd = os.getcwd()
+    cwd_path = Path(cwd).resolve()
+    sections: list[str] = []
+
+    for directory in _dirs_from_root_to_cwd(cwd_path):
+        section = _load_hermex_context_for_dir(
+            directory, cwd_path=cwd_path, context_length=context_length
+        )
+        if section:
+            sections.append(section)
+
+    if not skip_soul:
+        soul_content = load_soul_md(context_length)
+        if soul_content:
+            sections.append(soul_content)
+
+    if not sections:
+        return ""
+    return (
+        "# Hermex Layered Project Context\n\n"
+        "The following workspace instructions are loaded from broadest scope "
+        "to closest scope. Later sections specialize earlier sections when "
+        "they conflict.\n\n"
+        + "\n\n--- project-doc ---\n\n".join(sections)
+    )
+
+
 def build_context_files_prompt(
     cwd: Optional[str] = None,
     skip_soul: bool = False,

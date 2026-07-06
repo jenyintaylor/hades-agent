@@ -646,6 +646,14 @@ agent:
   # force it on or off; the HERMES_VERIFY_ON_STOP env var (1/0) takes precedence.
   # verify_on_stop: auto
 
+  # Prompt mode for the agent's coding/development posture.
+  # Default preserves Hermes' cache-optimized prompt behavior. Set "hermex" for
+  # a default-off Codex-like strict development mode with layered project
+  # context, deterministic high-confidence skill preloading, and verification
+  # defaults that also apply on gateway messaging surfaces.
+  # Aliases accepted: codex, codex-like, strict-development.
+  prompt_mode: "default"
+
   # Standing operator instructions for the coding posture (when Hermes is in a
   # code workspace). Appended to the coding brief as an extra system block, so
   # you can pin project-wide workflow rules without editing the shipped brief.

@@ -430,6 +430,7 @@ def summarize_background_review_actions(
                     "name": args.get("name", ""),
                     "old_string": args.get("old_string", ""),
                     "new_string": args.get("new_string", ""),
+                    "evidence": args.get("evidence", ""),
                 }
 
     actions: List[str] = []
@@ -455,17 +456,25 @@ def summarize_background_review_actions(
         detail = call_details.get(tcid, {})
         target = data.get("target", "") or detail.get("target", "")
         is_skill = detail.get("tool") == "skill_manage"
+        evidence_note = ""
+        if is_skill:
+            try:
+                from agent.hermex_maintenance_policy import evidence_suffix
+
+                evidence_note = evidence_suffix(detail.get("evidence"))
+            except Exception:
+                evidence_note = ""
 
         message_lower = message.lower()
         if not verbose:
             if "created" in message_lower:
-                actions.append(message)
+                actions.append(message + evidence_note)
                 continue
             if "updated" in message_lower:
-                actions.append(message)
+                actions.append(message + evidence_note)
                 continue
             if is_skill and "patched" in message_lower:
-                actions.append(message)
+                actions.append(message + evidence_note)
                 continue
 
         if is_skill:
@@ -496,14 +505,14 @@ def summarize_background_review_actions(
                     )
                     actions.append(
                         f"📝 Skill '{skill_name}' patched: "
-                        f"\"{old_preview}\" → \"{new_preview}\""
+                        f"\"{old_preview}\" → \"{new_preview}\"{evidence_note}"
                     )
                 elif action == "create" and description:
-                    actions.append(f"📝 Skill '{skill_name}' created: {description}")
+                    actions.append(f"📝 Skill '{skill_name}' created: {description}{evidence_note}")
                 elif action == "edit" and description:
-                    actions.append(f"📝 Skill '{skill_name}' rewritten: {description}")
+                    actions.append(f"📝 Skill '{skill_name}' rewritten: {description}{evidence_note}")
                 else:
-                    actions.append(f"📝 {message}" if message else f"Skill {action}")
+                    actions.append((f"📝 {message}" if message else f"Skill {action}") + evidence_note)
             elif operations:
                 for op in operations:
                     op = op or {}
@@ -662,6 +671,13 @@ def _run_review_in_thread(
             )
             review_agent._memory_write_origin = "background_review"
             review_agent._memory_write_context = "background_review"
+            try:
+                from agent.prompt_policy import policy_for_agent
+
+                review_agent._prompt_policy = policy_for_agent(agent)
+                review_agent._prompt_mode = review_agent._prompt_policy.mode
+            except Exception:
+                pass
             # The review fork pins the parent's cached system prompt and keeps
             # ``tools[]`` byte-identical to the parent so its outbound request
             # hits the same provider cache prefix (see the toolset-parity note
@@ -773,6 +789,12 @@ def _run_review_in_thread(
                 _reset_background_review_read_marks()
             except Exception:
                 pass
+            try:
+                from agent.hermex_maintenance_policy import reset_maintenance_marks
+
+                reset_maintenance_marks()
+            except Exception:
+                pass
 
             try:
                 # Routed to a different model -> replay a digest (cache is cold
@@ -782,9 +804,18 @@ def _run_review_in_thread(
                     _digest_history(messages_snapshot) if _routed
                     else messages_snapshot
                 )
+                review_prompt = prompt
+                try:
+                    from agent.hermex_maintenance_policy import HERMEX_BACKGROUND_REVIEW_GUIDANCE
+                    from agent.prompt_policy import policy_for_agent
+
+                    if policy_for_agent(agent).is_hermex:
+                        review_prompt = f"{prompt}\n\n{HERMEX_BACKGROUND_REVIEW_GUIDANCE}"
+                except Exception:
+                    pass
                 review_agent.run_conversation(
                     user_message=(
-                        prompt
+                        review_prompt
                         + "\n\nYou can only call memory and skill "
                         "management tools. Other tools will be denied "
                         "at runtime — do not attempt them."

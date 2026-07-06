@@ -999,6 +999,15 @@ DEFAULT_CONFIG = {
         #   "on"             — force the prompt posture everywhere.
         #   "off"            — disable entirely.
         "coding_context": "auto",
+        # Prompt policy. "default" preserves Hermes' cache-optimized prompt
+        # assembly. "hermex" enables a default-off, Codex-like strict
+        # coding/development policy: layered workspace instructions,
+        # stronger intent/tool/verification guidance, and stricter
+        # verification behavior on gateway as well as CLI/TUI sessions.
+        # Aliases accepted by the runtime include "codex-like" and
+        # "strict_development". The legacy boolean agent.hermex_mode is also
+        # accepted as a convenience override.
+        "prompt_mode": "default",
         # Standing operator instructions for the coding posture. A string (or
         # list of strings) appended to the coding brief as an extra stable
         # system block — pin project-wide workflow rules here instead of editing

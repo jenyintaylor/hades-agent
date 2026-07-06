@@ -57,6 +57,39 @@ class TestContextFileCwd:
         assert _captured_context_cwd(_make_agent()) == tmp_path
 
 
+class TestPromptPolicyRouting:
+    def test_default_uses_legacy_context_builder(self):
+        agent = _make_agent(_prompt_mode="default")
+        with (
+            patch("run_agent.load_soul_md", return_value=""),
+            patch("run_agent.build_nous_subscription_prompt", return_value=""),
+            patch("run_agent.build_environment_hints", return_value=""),
+            patch("run_agent.build_context_files_prompt", return_value="legacy context") as legacy,
+            patch("run_agent.build_hermex_context_files_prompt", return_value="hermex context") as hermex,
+        ):
+            parts = build_system_prompt_parts(agent)
+
+        assert parts["context"] == "legacy context"
+        legacy.assert_called_once()
+        hermex.assert_not_called()
+
+    def test_hermex_uses_layered_context_builder_and_guidance(self):
+        agent = _make_agent(_prompt_mode="hermex")
+        with (
+            patch("run_agent.load_soul_md", return_value=""),
+            patch("run_agent.build_nous_subscription_prompt", return_value=""),
+            patch("run_agent.build_environment_hints", return_value=""),
+            patch("run_agent.build_context_files_prompt", return_value="legacy context") as legacy,
+            patch("run_agent.build_hermex_context_files_prompt", return_value="hermex context") as hermex,
+        ):
+            parts = build_system_prompt_parts(agent)
+
+        assert parts["context"] == "hermex context"
+        assert "Hermex mode" in parts["stable"]
+        legacy.assert_not_called()
+        hermex.assert_called_once()
+
+
 def _stable_prompt(agent):
     with (
         patch("run_agent.load_soul_md", return_value=""),

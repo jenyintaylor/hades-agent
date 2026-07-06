@@ -554,6 +554,19 @@ CURATOR_REVIEW_PROMPT = (
 )
 
 
+def _with_hermex_curator_guidance(prompt: str) -> str:
+    """Append stricter Hermex curation rules only when Hermex mode is enabled."""
+    try:
+        from agent.hermex_maintenance_policy import HERMEX_CURATOR_GUIDANCE
+        from agent.prompt_policy import hermex_enabled
+
+        if hermex_enabled():
+            return f"{prompt}\n\n{HERMEX_CURATOR_GUIDANCE}"
+    except Exception:
+        pass
+    return prompt
+
+
 # ---------------------------------------------------------------------------
 # Per-run reports — {YYYYMMDD-HHMMSS}/run.json + REPORT.md under logs/curator/
 # ---------------------------------------------------------------------------
@@ -1660,6 +1673,7 @@ def run_curator_review(
                     )
                 else:
                     prompt = f"{CURATOR_REVIEW_PROMPT}{builtins_note}\n\n{candidate_list}"
+                prompt = _with_hermex_curator_guidance(prompt)
                 llm_meta = _run_llm_review(prompt)
                 final_summary = (
                     f"{prefix}{auto_summary}; llm: {llm_meta.get('summary', 'no change')}"
@@ -1903,6 +1917,20 @@ def _run_llm_review(prompt: str) -> Dict[str, Any]:
         # turn_context.py binds this onto the write-origin ContextVar at turn
         # start (see agent/turn_context.py).
         review_agent._memory_write_origin = "background_review"
+        review_agent._memory_write_context = "background_review"
+        try:
+            from agent.prompt_policy import resolve_prompt_policy
+
+            review_agent._prompt_policy = resolve_prompt_policy()
+            review_agent._prompt_mode = review_agent._prompt_policy.mode
+        except Exception:
+            pass
+        try:
+            from agent.hermex_maintenance_policy import reset_maintenance_marks
+
+            reset_maintenance_marks()
+        except Exception:
+            pass
 
         # Redirect the forked agent's stdout/stderr to /dev/null while it
         # runs so its tool-call chatter doesn't pollute the foreground
