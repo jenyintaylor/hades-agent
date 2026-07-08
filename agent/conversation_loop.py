@@ -596,14 +596,21 @@ def run_conversation(
     _should_review_memory = _ctx.should_review_memory
     _plugin_user_context = _ctx.plugin_user_context
     _ext_prefetch_cache = _ctx.ext_prefetch_cache
+    _hermex_task_capsule = ""
     _hermex_skill_context = ""
+    _hermex_enabled = False
     try:
         from agent.prompt_policy import policy_for_agent
 
         _policy = policy_for_agent(agent)
+        _hermex_enabled = bool(_policy.is_hermex)
+        if _hermex_enabled:
+            from agent.hermex_task_capsule import build_hermex_task_capsule
+
+            _hermex_task_capsule = build_hermex_task_capsule(original_user_message)
         _valid_tool_names = getattr(agent, "valid_tool_names", None) or set()
         _skill_tools_available = "skill_view" in _valid_tool_names
-        if _policy.is_hermex and _skill_tools_available:
+        if _hermex_enabled and _skill_tools_available:
             from agent.hermex_skill_preflight import build_hermex_skill_preload_context
 
             _hermex_skill_context = build_hermex_skill_preload_context(
@@ -806,6 +813,8 @@ def run_conversation(
             # never mutated, so nothing leaks into session persistence.
             if idx == current_turn_user_idx and msg.get("role") == "user":
                 _injections = []
+                if _hermex_task_capsule:
+                    _injections.append(_hermex_task_capsule)
                 if _ext_prefetch_cache:
                     _fenced = build_memory_context_block(_ext_prefetch_cache)
                     if _fenced:
@@ -814,6 +823,15 @@ def run_conversation(
                     _injections.append(_plugin_user_context)
                 if _hermex_skill_context:
                     _injections.append(_hermex_skill_context)
+                if _hermex_enabled:
+                    try:
+                        from agent.hermex_working_ledger import build_hermex_working_ledger
+
+                        _hermex_working_ledger = build_hermex_working_ledger(messages)
+                        if _hermex_working_ledger:
+                            _injections.append(_hermex_working_ledger)
+                    except Exception:
+                        logger.debug("Hermex working ledger build failed", exc_info=True)
                 if _injections:
                     _base = api_msg.get("content", "")
                     if isinstance(_base, str):
