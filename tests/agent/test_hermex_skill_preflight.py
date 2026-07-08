@@ -75,6 +75,9 @@ def test_build_context_loads_referenced_skill(tmp_path):
         )
 
     assert "<hermex_preloaded_skills>" in context
+    assert "<hermex_active_skill_obligations>" in context
+    assert 'Active skill: development-operating-procedure' in context
+    assert "Before finalizing, check this skill's procedure and completion contract." in context
     assert 'Hermex mode preloaded the "development-operating-procedure" skill' in context
     assert "Follow the contract block exactly." in context
 

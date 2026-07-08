@@ -43,7 +43,11 @@ from agent.prompt_builder import (
     TOOL_USE_ENFORCEMENT_MODELS,
     drain_truncation_warnings,
 )
-from agent.prompt_policy import HERMEX_EXECUTION_GUIDANCE, policy_for_agent
+from agent.prompt_policy import (
+    HERMEX_EXECUTION_GUIDANCE,
+    HERMEX_LCM_GUIDANCE,
+    policy_for_agent,
+)
 from agent.runtime_cwd import resolve_context_cwd
 
 
@@ -261,6 +265,8 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
 
     if _prompt_policy.is_hermex:
         stable_parts.append(HERMEX_EXECUTION_GUIDANCE)
+        if any(str(name).startswith("lcm_") for name in agent.valid_tool_names):
+            stable_parts.append(HERMEX_LCM_GUIDANCE)
 
     has_skills_tools = any(name in agent.valid_tool_names for name in ['skills_list', 'skill_view', 'skill_manage'])
     if has_skills_tools:

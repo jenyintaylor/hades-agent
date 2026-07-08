@@ -89,6 +89,34 @@ class TestPromptPolicyRouting:
         legacy.assert_not_called()
         hermex.assert_called_once()
 
+    def test_hermex_adds_lcm_guidance_when_lcm_tools_are_available(self):
+        agent = _make_agent(_prompt_mode="hermex", valid_tool_names=["lcm_grep"])
+        with (
+            patch("run_agent.load_soul_md", return_value=""),
+            patch("run_agent.build_nous_subscription_prompt", return_value=""),
+            patch("run_agent.build_environment_hints", return_value=""),
+            patch("run_agent.build_context_files_prompt", return_value=""),
+            patch("run_agent.build_hermex_context_files_prompt", return_value=""),
+        ):
+            parts = build_system_prompt_parts(agent)
+
+        assert "Hermex LCM discipline" in parts["stable"]
+        assert "lcm_grep" in parts["stable"]
+        assert "Do not call LCM for ordinary tasks" in parts["stable"]
+
+    def test_hermex_omits_lcm_guidance_without_lcm_tools(self):
+        agent = _make_agent(_prompt_mode="hermex", valid_tool_names=["read_file"])
+        with (
+            patch("run_agent.load_soul_md", return_value=""),
+            patch("run_agent.build_nous_subscription_prompt", return_value=""),
+            patch("run_agent.build_environment_hints", return_value=""),
+            patch("run_agent.build_context_files_prompt", return_value=""),
+            patch("run_agent.build_hermex_context_files_prompt", return_value=""),
+        ):
+            parts = build_system_prompt_parts(agent)
+
+        assert "Hermex LCM discipline" not in parts["stable"]
+
 
 def _stable_prompt(agent):
     with (

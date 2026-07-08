@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agent.context_compressor import ContextCompressor
+from agent.prompt_policy import HERMEX_PROMPT_MODE, PromptPolicy
 from agent.turn_context import TurnContext, build_turn_context
 from hermes_state import SessionDB
 
@@ -32,6 +33,20 @@ class _FakeGuardrails:
 
     def reset_for_turn(self):
         self.reset_called = True
+
+
+class _RecordingMemoryManager:
+    def __init__(self, prefetch_result="memory context"):
+        self.prefetch_result = prefetch_result
+        self.turn_starts = []
+        self.prefetch_calls = []
+
+    def on_turn_start(self, turn_number, message):
+        self.turn_starts.append((turn_number, message))
+
+    def prefetch_all(self, query, *, session_id=""):
+        self.prefetch_calls.append({"query": query, "session_id": session_id})
+        return self.prefetch_result
 
 
 class _FakeAgent:
@@ -222,6 +237,42 @@ def test_no_review_when_memory_disabled():
     assert ctx.should_review_memory is False
 
 
+def test_memory_prefetch_receives_session_id():
+    agent = _FakeAgent()
+    agent._memory_manager = _RecordingMemoryManager()
+
+    ctx = _build(agent)
+
+    assert ctx.ext_prefetch_cache == "memory context"
+    assert agent._memory_manager.turn_starts == [(1, "hello")]
+    assert agent._memory_manager.prefetch_calls == [
+        {"query": "hello", "session_id": "sess-1"}
+    ]
+
+
+def test_hermex_memory_prefetch_uses_bounded_context_query():
+    agent = _FakeAgent()
+    agent._prompt_policy = PromptPolicy(HERMEX_PROMPT_MODE)
+    agent._memory_manager = _RecordingMemoryManager()
+
+    _build(
+        agent,
+        user_message="api-prefixed content",
+        persist_user_message="clean user request",
+        task_id="task-42",
+    )
+
+    call = agent._memory_manager.prefetch_calls[0]
+    query = call["query"]
+    assert call["session_id"] == "sess-1"
+    assert query.startswith("<hermex_memory_query>")
+    assert "clean user request" in query
+    assert "session_id: sess-1" in query
+    assert "task_id: task-42" in query
+    assert "cwd:" in query
+    assert len(query) <= 4096
+
+
 def test_ensure_db_session_runs_after_system_prompt_restore():
     """Regression for #45499.
 
@@ -363,4 +414,3 @@ def test_expired_cooldown_allows_preflight(tmp_path):
     assert isinstance(ctx, TurnContext)
     agent._emit_status.assert_called_once()
     agent._compress_context.assert_called()
-

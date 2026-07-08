@@ -45,7 +45,15 @@ def test_env_prompt_mode_wins(monkeypatch):
 
 def test_env_hermex_mode_wins(monkeypatch):
     monkeypatch.delenv("HERMES_PROMPT_MODE", raising=False)
+    monkeypatch.delenv("HERMEX_MODE", raising=False)
     monkeypatch.setenv("HERMES_HERMEX_MODE", "1")
 
     assert resolve_prompt_policy({"agent": {"prompt_mode": "default"}}).is_hermex
 
+
+def test_env_short_hermex_mode_alias_wins(monkeypatch):
+    monkeypatch.delenv("HERMES_PROMPT_MODE", raising=False)
+    monkeypatch.delenv("HERMES_HERMEX_MODE", raising=False)
+    monkeypatch.setenv("HERMEX_MODE", "1")
+
+    assert resolve_prompt_policy({"agent": {"prompt_mode": "default"}}).is_hermex

@@ -23,6 +23,7 @@ move-and-name refactor with no semantic change.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import uuid
 from dataclasses import dataclass
@@ -36,6 +37,58 @@ from agent.model_metadata import (
 )
 
 logger = logging.getLogger(__name__)
+
+_HERMEX_MEMORY_QUERY_MAX_CHARS = 4096
+
+
+def _truncate_for_hermex_memory_query(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    marker = "\n[truncated]"
+    keep = max(0, max_chars - len(marker))
+    return text[:keep].rstrip() + marker
+
+
+def _build_memory_prefetch_query(
+    agent: Any,
+    original_user_message: Any,
+    *,
+    task_id: str,
+) -> str:
+    """Build the query sent to external memory providers for this turn."""
+    user_text = original_user_message if isinstance(original_user_message, str) else ""
+    if not user_text:
+        return ""
+
+    try:
+        from agent.prompt_policy import policy_for_agent
+
+        is_hermex = policy_for_agent(agent).is_hermex
+    except Exception:
+        is_hermex = False
+    if not is_hermex:
+        return user_text
+
+    try:
+        cwd = os.getcwd()
+    except Exception:
+        cwd = ""
+
+    lines = [
+        "<hermex_memory_query>",
+        "user_request:",
+        user_text,
+        "retrieval_intent: recall durable facts and recent session/project context relevant to the user_request",
+        f"session_id: {getattr(agent, 'session_id', '') or ''}",
+        f"task_id: {task_id or ''}",
+        f"cwd: {cwd}",
+        f"model: {getattr(agent, 'model', '') or ''}",
+        "</hermex_memory_query>",
+    ]
+    return _truncate_for_hermex_memory_query(
+        "\n".join(lines),
+        _HERMEX_MEMORY_QUERY_MAX_CHARS,
+    )
 
 
 def _compression_made_progress(
@@ -486,8 +539,18 @@ def build_turn_context(
     ext_prefetch_cache = ""
     if agent._memory_manager:
         try:
-            _query = original_user_message if isinstance(original_user_message, str) else ""
-            ext_prefetch_cache = agent._memory_manager.prefetch_all(_query) or ""
+            _query = _build_memory_prefetch_query(
+                agent,
+                original_user_message,
+                task_id=effective_task_id,
+            )
+            ext_prefetch_cache = (
+                agent._memory_manager.prefetch_all(
+                    _query,
+                    session_id=getattr(agent, "session_id", "") or "",
+                )
+                or ""
+            )
         except Exception:
             pass
 

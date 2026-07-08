@@ -152,6 +152,22 @@ def _truncate_context(context: str, max_chars: int) -> str:
     return context[:keep].rstrip() + marker
 
 
+def _build_obligations_block(skill_names: Sequence[str]) -> str:
+    lines = [
+        "<hermex_active_skill_obligations>",
+        (
+            "Hermex mode has active skill obligations for this turn. Treat each "
+            "loaded skill's procedure, constraints, and completion contract as "
+            "binding unless the user overrides them."
+        ),
+    ]
+    for name in skill_names:
+        lines.append(f"- Active skill: {name}")
+    lines.append("Before finalizing, check this skill's procedure and completion contract.")
+    lines.append("</hermex_active_skill_obligations>")
+    return "\n".join(lines)
+
+
 def build_hermex_skill_preload_context(
     user_message: Any,
     *,
@@ -180,11 +196,13 @@ def build_hermex_skill_preload_context(
         return ""
 
     blocks: list[str] = []
+    loaded_skill_names: list[str] = []
     for identifier in candidates:
         loaded = _load_skill_payload(identifier, task_id=task_id)
         if not loaded:
             continue
         loaded_skill, skill_dir, skill_name = loaded
+        loaded_skill_names.append(skill_name)
 
         try:
             from tools.skill_usage import bump_use
@@ -223,6 +241,7 @@ def build_hermex_skill_preload_context(
                 "the current user message. Follow their activation notes and content "
                 "when relevant to the user's requested work."
             ),
+            _build_obligations_block(loaded_skill_names),
             *blocks,
             "</hermex_preloaded_skills>",
         ]

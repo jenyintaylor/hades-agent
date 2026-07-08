@@ -60,6 +60,20 @@ HERMEX_EXECUTION_GUIDANCE = (
     "</completion_gate>"
 )
 
+HERMEX_LCM_GUIDANCE = (
+    "# Hermex LCM discipline\n"
+    "<lcm_recall_discipline>\n"
+    "- LCM tools are available for bounded recall of current-session, compacted, "
+    "or continuation context. When a request depends on earlier work, prior "
+    "decisions, compacted details, or session continuity, use `lcm_grep`, "
+    "`lcm_expand_query`, or `lcm_expand` before answering from memory.\n"
+    "- When the user asks about LCM health, context pressure, or retrieval "
+    "state, use `lcm_status` or `lcm_doctor`.\n"
+    "- Do not call LCM for ordinary tasks that do not depend on prior or "
+    "compacted context.\n"
+    "</lcm_recall_discipline>"
+)
+
 
 @dataclass(frozen=True)
 class PromptPolicy:
@@ -97,7 +111,8 @@ def resolve_prompt_policy(config: dict[str, Any] | None = None) -> PromptPolicy:
 
     Environment variables are intentionally narrow so gateway, CLI, and tests
     can force the same mode without adding per-surface plumbing:
-    ``HERMES_PROMPT_MODE=hermex`` or ``HERMES_HERMEX_MODE=1``.
+    ``HERMES_PROMPT_MODE=hermex``, ``HERMES_HERMEX_MODE=1``, or the shorter
+    ``HERMEX_MODE=1`` compatibility alias.
     """
     env_mode = os.environ.get("HERMES_PROMPT_MODE")
     if env_mode is not None:
@@ -106,6 +121,15 @@ def resolve_prompt_policy(config: dict[str, Any] | None = None) -> PromptPolicy:
     env_hermex = os.environ.get("HERMES_HERMEX_MODE")
     if env_hermex is not None:
         token = env_hermex.strip().lower()
+        return PromptPolicy(
+            HERMEX_PROMPT_MODE
+            if token not in {"0", "false", "no", "off", ""}
+            else DEFAULT_PROMPT_MODE
+        )
+
+    env_short_hermex = os.environ.get("HERMEX_MODE")
+    if env_short_hermex is not None:
+        token = env_short_hermex.strip().lower()
         return PromptPolicy(
             HERMEX_PROMPT_MODE
             if token not in {"0", "false", "no", "off", ""}
@@ -140,4 +164,3 @@ def policy_for_agent(agent: Any) -> PromptPolicy:
 
 def hermex_enabled(config: dict[str, Any] | None = None) -> bool:
     return resolve_prompt_policy(config).is_hermex
-
